@@ -1,8 +1,10 @@
 import random
 from tqdm import tqdm
+import concurrent.futures
+from collections import Counter
 
+r2_algo_efficiency  = {}
 
-PLAYER_NAMES = [ f"Player {x}" for x in range(1,73)]
 
 INVERSE_DRAFT_MAPPING = { 0:5, 1:4, 2:3, 3:2, 4:1, 5:0}
 
@@ -39,9 +41,11 @@ class TournamentTable:
         for x in range(6):
             self.seats[x] = None
 
-r2_algo_efficiency  = {}
+def simulate_tournament(iter_count: int = 0):
 
-def simulate_tournament():
+    
+    PLAYER_NAMES = [ f"Player {x}" for x in range(1,73)]
+
 
     player_data_map = {}
     for name in PLAYER_NAMES:
@@ -112,20 +116,18 @@ def simulate_tournament():
                 table.seats[desired_draft_slot] = player
                 player_data_map[player].r2_table_num = table.table_number
             else:
-                # print(f"Whoopsiedoodle how did this happen {player:9}, {desired_draft_slot}")
                 r2_tables_okay = False
                 continue
 
-
-        for t in r2_tables:
-            for player in [t for t in t.seats.values() if t is not None]:
-                if player not in player_data_map:
-                    print("How did you get here Mr ", player)
-                r1_opts = player_data_map[player].r1_opponents
-                if len([x for x in r1_opts if x in t.seats.values() and x != player]):
-                    r2_tables_okay = False
-                    continue
-                    # print(f"Found a bad r2!! {player} : {r1_opts} ::: {table_players} !! {[x for x in r1_opts if x in table_players and x != player]}")
+        if r2_tables_okay:
+            for t in r2_tables:
+                for player in [t for t in t.seats.values() if t is not None]:
+                    if player not in player_data_map:
+                        print("How did you get here Mr ", player)
+                    r1_opts = player_data_map[player].r1_opponents
+                    if len([x for x in r1_opts if x in t.seats.values() and x != player]):
+                        r2_tables_okay = False
+                        continue
 
     
     # print(f"Took {r2_pairing_count} tries for a clean r2")
@@ -154,15 +156,31 @@ def simulate_tournament():
     return double_winner_count
 
 
-result_bucket = {}
+# result_bucket = {}
 
-iteration_count = 100_000
-for _ in tqdm(range(iteration_count)):
-    double_win_count = simulate_tournament()
-    if double_win_count not in result_bucket:
-        result_bucket[double_win_count] = 1
-    else:
-        result_bucket[double_win_count] += 1
+iteration_count = 1_000
+
+with tqdm(total=iteration_count) as pbar:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(simulate_tournament, arg): arg for arg in range(iteration_count)}
+        results = {}
+        for future in concurrent.futures.as_completed(futures):
+            arg = futures[future]
+            results[arg] = future.result()
+            pbar.update(1)
+result_bucket = Counter()
+for x in results.values():
+    result_bucket[x] += 1
+
+
+
+# This works w/o parallelism
+# for _ in tqdm(range(iteration_count)):
+#     double_win_count = simulate_tournament()
+#     if double_win_count not in result_bucket:
+#         result_bucket[double_win_count] = 1
+#     else:
+#         result_bucket[double_win_count] += 1
 
 
 print(f"Ran shuffle simulation for {iteration_count} simulated tournaments")
