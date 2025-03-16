@@ -8,8 +8,9 @@ r2_algo_efficiency  = {}
 
 INVERSE_DRAFT_MAPPING = { 0:5, 1:4, 2:3, 3:2, 4:1, 5:0}
 
-SOS_FORMAT = "ONLY_GAME_WIN_SCORES"
+# SOS_FORMAT = "ONLY_GAME_WIN_SCORES"
 # SOS_FORMAT = "ALL_OPPONENTS_SCORES"
+# SOS_FORMAT = "ONLY_GAME_WIN_GAME_POINTS"
 PROBABLISTIC_RD2 = False
 
 class PlayerData:
@@ -18,13 +19,16 @@ class PlayerData:
     r1_draft_slot: int = 0
     r1_opponents: list[str] = []
     r1_win : bool = False
+    r1_points : int = 0
 
     r2_table_num: int = 0
     r2_draft_slot: int = 0
     r2_opponents: list[str] = []
     r2_win: bool = False
+    r2_points : int = 0
 
-    opp_totals: int = -1
+    opp_totals: int = 0
+    win_count: int = 0
 
     def __init__(self, name: str):
         self.name = name
@@ -32,13 +36,16 @@ class PlayerData:
         self.r1_draft_slot = -1
         self.r1_opponents = []
         self.r1_win = False
+        self.r1_tiebreaker = False
 
         self.r2_table_num = -1
         self.r2_draft_slot = -1
         self.r2_opponents = []
         self.r2_win = False
+        self.r2_tiebreaker = False
 
-        self.opp_totals = -1
+        self.opp_totals = 0
+        self.win_count = 0
 
 
 class TournamentTable:
@@ -84,11 +91,17 @@ def simulate_tournament(iter_count: int = 0):
         winner = table.seats[draft_slot_that_wins]
         table.winner_name = winner
         player_data_map[winner].r1_win = True
+        player_data_map[winner].r1_points = 10
+        if random.randint(0,5) == 0:
+            player_data_map[winner].r1_tiebreaker = True
+
 
         player_name_list = [x for _, x in table.seats.items()]
 
         # fill in opponents in case we want to deconflict later
         for _, player_name in table.seats.items():
+            if player_name != winner:
+                player_data_map[player_name].r1_points = random.randint(6,10)
             player_data_map[player_name].r1_opponents = [x for x in player_name_list if x != player_name]
 
 
@@ -179,54 +192,67 @@ def simulate_tournament(iter_count: int = 0):
         if t.winner_name is None:
             print("Got a none winner with left beef: ", t.__dict__)
         player_data_map[t.winner_name].r2_win = True
-
+        player_data_map[t.winner_name].r2_points = 10
+        if random.randint(0,5) == 0:
+            player_data_map[t.winner_name].r2_tiebreaker = True
+        for player in t.seats.values():
+            if player != t.winner_name:
+                player_data_map[player].r2_points = random.randint(6,10)
 
     
 
-    # print("Round 2 summary : ")
-    # for t in r2_tables:
-    #     print(f"{t.table_number:2} = won by {t.winner_name:9} :: {t.seats} ")
+    # sweep wins in here to make life easier later
+    for pd in player_data_map.values():
+        pd.win_count += 1 if pd.r1_win else 0
+        pd.win_count += 1 if pd.r2_win else 0
 
-    # find double winners
-    double_winners = [x for _, x in player_data_map.items() if x.r1_win and x.r2_win]
-    # print("Double winners: ", [x.name for x in double_winners])
+    double_winner_count = len([x for x in player_data_map.values() if x.win_count == 2])
 
-    double_winner_count = len(double_winners)
+    single_winners = [x for x in player_data_map.values() if x.win_count == 1]
 
-    # next let's check some sos stuff
-    single_winners = [x for x in player_data_map.values() if x.r1_win ^ x.r2_win]
 
-    if SOS_FORMAT == "ALL_OPPONENTS_SCORES":
+    # Elspeth partial set, don't have step 5 in 
 
-        for pd in single_winners:
-            running_total = 0
+    WON_ROUND_POINT_MULT = 1000
+    LOST_ROUND_POINT_MULT = 100
+
+    # these are additive not multiplicitave
+    BAD_DRAFT_SEAT_POINT_MOD = 10
+    NON_TIEBREAKER_WIN = 10_000
+
+
+    # Tally up points from win and lost rounds using multipliers above
+    for pd in player_data_map.values():
+        # Check for r1 winners
+        if pd.r1_win:
+            if not pd.r1_tiebreaker:
+                pd.opp_totals += NON_TIEBREAKER_WIN
             for opp in pd.r1_opponents:
-                if player_data_map[opp].r1_win:
-                    running_total += 1
-                if player_data_map[opp].r2_win:
-                    running_total += 1
+                pd.opp_totals += WON_ROUND_POINT_MULT * player_data_map[opp].win_count
+        else:
+            for opp in pd.r1_opponents:
+                pd.opp_totals += LOST_ROUND_POINT_MULT * player_data_map[opp].win_count
+
+        if pd.r2_win:
+            if not pd.r2_tiebreaker:
+                pd.opp_totals += NON_TIEBREAKER_WIN
             for opp in pd.r2_opponents:
-                if player_data_map[opp].r1_win:
-                    running_total += 1
-                if player_data_map[opp].r2_win:
-                    running_total += 1
-            pd.opp_totals = running_total
+                pd.opp_totals += WON_ROUND_POINT_MULT * player_data_map[opp].win_count            
+        else:
+            for opp in pd.r2_opponents:
+                pd.opp_totals += LOST_ROUND_POINT_MULT * player_data_map[opp].win_count
 
-    elif SOS_FORMAT == "ONLY_GAME_WIN_SCORES":
 
-        for pd in player_data_map.values():
-            running_total = 0
-            # this looks weird but since we only count rounds a player wins
-            # we only have to check their wins in the other round!
-            if pd.r1_win: 
-                for opp in pd.r1_opponents:
-                    if player_data_map[opp].r2_win:
-                        running_total += 1
-            if pd.r2_win:
-                for opp in pd.r2_opponents:
-                    if player_data_map[opp].r1_win:
-                        running_total+= 1
-            pd.opp_totals = running_total
+
+
+    # Add weighting for lower draft seats
+    for pd in player_data_map.values():
+        if pd.r1_win and pd.r1_draft_slot > 2:
+            pd.opp_totals += BAD_DRAFT_SEAT_POINT_MOD
+        if pd.r2_win and pd.r2_draft_slot > 2:
+            pd.opp_totals += BAD_DRAFT_SEAT_POINT_MOD
+
+
 
     sos_counts = Counter()
     for pd in single_winners:
@@ -239,8 +265,9 @@ def simulate_tournament(iter_count: int = 0):
     # print(f"db{double_winner_count}+[", end='')
     # for sos_value in sos_values:
 
+
     if double_winner_count >= 6:
-        return (double_winner_count, double_winner_count, double_winner_count)
+        return (double_winner_count, double_winner_count, double_winner_count, (-1,-2))
 
     for sos_value in sos_values:
         # print(f"{sos_counts[sos_value]},",end='')
@@ -248,10 +275,10 @@ def simulate_tournament(iter_count: int = 0):
         if price_is_right_count + count_at_sos_value == 6:
             price_is_right_count = 6
             overshoot_count = 6
-            return (double_winner_count, price_is_right_count, overshoot_count)
+            return (double_winner_count, price_is_right_count, overshoot_count, (0,0))
         elif price_is_right_count + count_at_sos_value > 6:
             overshoot_count = price_is_right_count + count_at_sos_value
-            return (double_winner_count, price_is_right_count, overshoot_count)
+            return (double_winner_count, price_is_right_count, overshoot_count, (6-price_is_right_count,count_at_sos_value))
         else:
             price_is_right_count += count_at_sos_value 
             overshoot_count = price_is_right_count
@@ -259,12 +286,12 @@ def simulate_tournament(iter_count: int = 0):
 
     # print(f"] => [{price_is_right_count},{overshoot_count}]")
 
-    return (double_winner_count, price_is_right_count, overshoot_count)
+    return (double_winner_count, price_is_right_count, overshoot_count, (-2,-2))
 
 
 # result_bucket = {}
 
-iteration_count = 100_000
+iteration_count = 10_000
 
 with tqdm(total=iteration_count) as pbar:
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -280,6 +307,8 @@ num_one_oh_players = Counter()
 pir_counter = Counter()
 overshoot_counter = Counter()
 
+overshoot_width = Counter()
+
 
 for result in results.values():
     # print("result",result)
@@ -288,6 +317,7 @@ for result in results.values():
     num_one_oh_players[24 - (2*result[0])] += 1
     pir_counter[result[1]] += 1
     overshoot_counter[result[2]] += 1
+    overshoot_width[result[3]] += 1
 
 
     
@@ -310,7 +340,7 @@ def print_counter_descending_keys(values, int_keys=True):
                 print(f"{x:2} : {values[x]:6} :: {(values[x] / iteration_count)*100:2.2f}%")
     else:
         for x in sorted(values, reverse=True):
-            print(f"{x:2} : {values[x]:6} :: {(values[x] / iteration_count)*100:2.2f}%")
+            print(f"{x} : {values[x]:6} :: {(values[x] / iteration_count)*100:2.2f}%")
 
 print(f"Ran shuffle simulation for {iteration_count} simulated tournaments")
 print("Number of simulations with N double-winners : ")
@@ -334,7 +364,8 @@ print_counter_descending_keys(pir_counter)
 print("Number of players cutting to have at least 6p")
 print_counter_descending_keys(overshoot_counter)
 
-
+print("Number of players in the overshoot group")
+print_counter_descending_keys(overshoot_width, int_keys=False)
 
 # print("Trying to measure stratification")
 # print_counter_descending_keys(pir_overshoot_count, int_keys = False)
