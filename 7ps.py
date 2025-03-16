@@ -36,13 +36,13 @@ class PlayerData:
         self.r1_draft_slot = -1
         self.r1_opponents = []
         self.r1_win = False
-        self.r1_tiebreaker = False
+        self.r1_fiesta = False
 
         self.r2_table_num = -1
         self.r2_draft_slot = -1
         self.r2_opponents = []
         self.r2_win = False
-        self.r2_tiebreaker = False
+        self.r2_fiesta = False
 
         self.opp_totals = 0
         self.win_count = 0
@@ -93,7 +93,7 @@ def simulate_tournament(iter_count: int = 0):
         player_data_map[winner].r1_win = True
         player_data_map[winner].r1_points = 10
         if random.randint(0,5) == 0:
-            player_data_map[winner].r1_tiebreaker = True
+            player_data_map[winner].r1_fiesta = True
 
 
         player_name_list = [x for _, x in table.seats.items()]
@@ -194,7 +194,7 @@ def simulate_tournament(iter_count: int = 0):
         player_data_map[t.winner_name].r2_win = True
         player_data_map[t.winner_name].r2_points = 10
         if random.randint(0,5) == 0:
-            player_data_map[t.winner_name].r2_tiebreaker = True
+            player_data_map[t.winner_name].r2_fiesta = True
         for player in t.seats.values():
             if player != t.winner_name:
                 player_data_map[player].r2_points = random.randint(6,10)
@@ -212,21 +212,26 @@ def simulate_tournament(iter_count: int = 0):
 
 
     # Elspeth partial set, don't have step 5 in 
-
     WON_ROUND_POINT_MULT = 1000
     LOST_ROUND_POINT_MULT = 100
+    DRAFT_SLOT_MULT = 1
 
     # these are additive not multiplicitave
+    
+    # this triggers in a game won by someone in seat 4-6 in the draft
     BAD_DRAFT_SEAT_POINT_MOD = 10
-    NON_TIEBREAKER_WIN = 10_000
+    # this currently triggers 5/6th of the time
+    FIESTA_PENALTY = 10_000
+
 
 
     # Tally up points from win and lost rounds using multipliers above
     for pd in player_data_map.values():
         # Check for r1 winners
         if pd.r1_win:
-            if not pd.r1_tiebreaker:
-                pd.opp_totals += NON_TIEBREAKER_WIN
+            if not pd.r1_fiesta:
+                pd.opp_totals += FIESTA_PENALTY
+            pd.opp_totals += DRAFT_SLOT_MULT * pd.r1_draft_slot
             for opp in pd.r1_opponents:
                 pd.opp_totals += WON_ROUND_POINT_MULT * player_data_map[opp].win_count
         else:
@@ -234,8 +239,9 @@ def simulate_tournament(iter_count: int = 0):
                 pd.opp_totals += LOST_ROUND_POINT_MULT * player_data_map[opp].win_count
 
         if pd.r2_win:
-            if not pd.r2_tiebreaker:
-                pd.opp_totals += NON_TIEBREAKER_WIN
+            if not pd.r2_fiesta:
+                pd.opp_totals += FIESTA_PENALTY
+            pd.opp_totals += DRAFT_SLOT_MULT * pd.r2_draft_slot
             for opp in pd.r2_opponents:
                 pd.opp_totals += WON_ROUND_POINT_MULT * player_data_map[opp].win_count            
         else:
@@ -291,7 +297,7 @@ def simulate_tournament(iter_count: int = 0):
 
 # result_bucket = {}
 
-iteration_count = 10_000
+iteration_count = 100_000
 
 with tqdm(total=iteration_count) as pbar:
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
